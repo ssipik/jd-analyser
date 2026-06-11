@@ -108,6 +108,38 @@ jd-analyser/
   cron (`0 8 * * * uv run python -m jd_analyser run`) or systemd timer; logging to file.
   *(Components P1–P5 are built and tested individually first; full wiring comes later.)*
 - **P7 — Indeed**: implement `IndeedMCPInterface` + `IndeedScan` once the MCP shape is known.
+- **P8 — Source-onboarding agent** *(agreed 2026-06-11; resume only after the current version
+  — P6, then P7 — is done)*: an agentic flow for adding new job sources (LinkedIn etc.),
+  tiered by how much already exists:
+  - **Tier 0 — known source**: implementation exists → agent only configures + validates it.
+  - **Tier 1 — new source, known pattern**: clone the proven skeleton (email-alert scan à la
+    StepStone, or MCP à la Indeed) and generate only the new parser/field-mapping.
+  - **Tier 2 — new source, novel transport**: supervised from-scratch attempt.
+
+  Up front, a research step surveys the integration options (API / MCP / email alerts / other)
+  and presents a recommendation the **user** chooses from — official API > email alerts >
+  scraping, with ToS problems flagged (e.g. LinkedIn forbids scraping and has no public
+  job-search API, so its viable path is email alerts).
+
+  **Form: start as a dev-loop Claude Code skill** (e.g. `/add-source <board>`) rather than an
+  in-app agent — it reuses CLAUDE.md context and the test suite, and the human is the review
+  gate. Promote to an in-app version (Claude Agent SDK) only if runtime self-service is ever
+  actually needed.
+
+  Hard requirements regardless of form:
+  1. **Verification gate** — a generated source must pass the unit suite *and* a live smoke
+     test (parse real captured samples / fetch one real listing into sane `JobDescription`s)
+     before activation; until then it is quarantined (nothing analysed or notified from it).
+  2. **Human diff review before install** — generated code runs with Gmail tokens & API keys.
+  3. **Registry** — `config/sources.yaml` mapping source name → implementation, read by the
+     deterministic pipeline; the agent's entire output is "new module + registry entry".
+  4. **Rot loop** — a source that starts yielding zero jobs or parse errors is flagged for the
+     agent to re-derive; recurring repair is where the agent earns its keep.
+
+  Highest-leverage variant: a **parser-deriving agent** over the email-alert path (subscribe to
+  any board's alert emails → `dump-samples` → agent derives `parse_X_email` + tests from the
+  captured HTML). This generalises to every board that can send email and also de-fragilises
+  today's hand-tuned `parse_stepstone_email`.
 
 ## Prerequisites the user must supply
 1. **Google Cloud OAuth client** (Desktop) for Gmail API → `credentials/client_secret.json`
@@ -132,4 +164,3 @@ jd-analyser/
   to yourself via `GmailAPIInterface.send`.
 
 *End-to-end run, idempotency double-run, live digest, and scheduling are validated in deferred P6.*
-```
