@@ -13,11 +13,22 @@
       "justMyCode": false
     },
     {
-      "name": "jd-analyser: dump-samples (needs Gmail creds)",
+      "name": "jd-analyser: dump-samples",
       "type": "debugpy",
       "request": "launch",
       "module": "jd_analyser",
       "args": ["dump-samples", "--limit", "5"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "justMyCode": false
+    },
+    {
+      "name": "jd-analyser: run",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "jd_analyser",
+      "args": ["run", "--limit", "10"],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",

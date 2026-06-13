@@ -106,7 +106,21 @@ jd-analyser/
 ### Deferred to later (out of current scope)
 - **P6 — Pipeline + scheduling**: orchestrate the components end-to-end; `--dry-run/--limit/--no-llm`;
   cron (`0 8 * * * uv run python -m jd_analyser run`) or systemd timer; logging to file.
-  *(Components P1–P5 are built and tested individually first; full wiring comes later.)*
+  *(Done 2026-06-12 — `pipeline.py` + `run` command, status-driven/resumable; scheduling still open.)*
+- **P6.5 — request.md prompt integration** *(agreed & built 2026-06-13; salary wording still to be
+  tuned by the user in request.md — config-only change)*: `config/request.md` replaces the built-in
+  system template + `criteria.md`/`exceptions.md` (both retired, examples deleted) as the analysis
+  prompt. Decisions:
+  - **Multi-language profiles confirmed**: user maintains both → `config/profile.en.md` +
+    `config/profile.de.md`; loader change in `JobAnalyzer.from_config`; model matches the profile
+    to the JD language (English fallback + note).
+  - **No `recommended_action`** in the new output — the user decides himself (drop from schema).
+  - New output fields (language, tone, fit_score + combined_score, salary range/ask, structured
+    old→new CV edits) require `ANALYSIS_SCHEMA` + `JobAnalysis` + digest template to change in
+    lockstep.
+  - **Salary instruction needs tuning** (user wants to think about it): current text bases the
+    estimate on the JD range (treated as conservative) or ~80-85k current salary; the
+    direction/meaning of the "recommended ask" is still ambiguous — revisit wording before wiring.
 - **P7 — Indeed**: implement `IndeedMCPInterface` + `IndeedScan` once the MCP shape is known.
 - **P8 — Source-onboarding agent** *(agreed 2026-06-11; resume only after the current version
   — P6, then P7 — is done)*: an agentic flow for adding new job sources (LinkedIn etc.),

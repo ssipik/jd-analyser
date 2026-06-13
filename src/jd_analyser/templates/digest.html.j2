@@ -39,17 +39,18 @@
 
   {% for item in items %}
   {% set a = item.analysis %}{% set j = item.job %}
-  <div class="card {{ 'below' if a.match_score < threshold else '' }}">
+  <div class="card {{ 'below' if a.combined_score < threshold else '' }}">
     <h2>{{ j.title }}</h2>
     <div class="company">{{ j.company }}{% if j.location %} · {{ j.location }}{% endif %}</div>
 
     <div class="badges">
-      {% if a.match_score >= threshold %}{% set sc = 'score-high' %}
-      {% elif a.match_score >= threshold - 20 %}{% set sc = 'score-mid' %}
+      {% if a.combined_score >= threshold %}{% set sc = 'score-high' %}
+      {% elif a.combined_score >= threshold - 20 %}{% set sc = 'score-mid' %}
       {% else %}{% set sc = 'score-low' %}{% endif %}
-      <span class="badge {{ sc }}">{{ a.match_score }}% match</span>
-      <span class="badge action">{{ a.recommended_action.value | upper }}</span>
+      <span class="badge {{ sc }}">{{ a.combined_score }}% combined</span>
+      <span class="badge action">{{ a.fit_score }}% fit</span>
       <span class="badge like-{{ a.like_verdict.value }}">would {{ a.like_verdict.value }}</span>
+      <span class="badge action">{{ a.language | upper }}{% if a.tone %} · {{ a.tone }}{% endif %}</span>
     </div>
 
     <div class="summary">{{ a.summary }}</div>
@@ -70,9 +71,14 @@
     <div class="section"><h3>Would you like it?</h3>
       <div class="summary">{{ a.like_rationale }}</div></div>
 
-    {% if a.cv_suggestions %}
-    <div class="section"><h3>CV suggestions</h3><ul>
-      {% for s in a.cv_suggestions %}<li>{{ s }}</li>{% endfor %}</ul></div>
+    {% if a.salary_range or a.salary_ask %}
+    <div class="section"><h3>Salary</h3>
+      <div class="summary">{{ a.salary_range }}{% if a.salary_ask %} · recommended ask: {{ a.salary_ask }}{% endif %}</div></div>
+    {% endif %}
+
+    {% if a.cv_edits %}
+    <div class="section"><h3>CV edits ({{ a.profile_used | upper }} profile)</h3><ul>
+      {% for e in a.cv_edits %}<li><s>{{ e.old }}</s><br>→ {{ e.new }}</li>{% endfor %}</ul></div>
     {% endif %}
 
     <div class="section"><h3>Cover letter draft</h3>

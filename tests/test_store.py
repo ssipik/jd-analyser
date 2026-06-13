@@ -1,7 +1,7 @@
 """Tests for JobStore: dedup, analysis round-trip, status, and message tracking."""
 import pytest
 
-from jd_analyser.models import JobAnalysis, JobDescription, LikeVerdict, RecommendedAction
+from jd_analyser.models import JobAnalysis, JobDescription, LikeVerdict
 from jd_analyser.store import JobStore
 
 
@@ -24,16 +24,21 @@ def _job(external_id: str, source: str = "stepstone") -> JobDescription:
 
 def _analysis(score: int = 82) -> JobAnalysis:
     return JobAnalysis(
-        match_score=score,
+        language="en",
+        tone="formal",
+        profile_used="en",
+        fit_score=score - 5,
+        combined_score=score,
         summary="Strong fit",
         pros=["Python", "SQL"],
         cons_hard=[],
         cons_soft=["No Kubernetes"],
         like_verdict=LikeVerdict.LIKE,
         like_rationale="Remote-friendly",
-        cv_suggestions=["Highlight SQL"],
+        salary_range="60.000-75.000 €",
+        salary_ask="72.000 €",
+        cv_edits=[{"old": "Did SQL.", "new": "Modelled analytics in SQL."}],
         cover_letter="Dear hiring team...",
-        recommended_action=RecommendedAction.APPLY,
     )
 
 
@@ -59,7 +64,7 @@ def test_analysis_roundtrip_and_status(store):
     store.save_analysis("stepstone", "1", _analysis(score=91))
     row = store.get_job("stepstone", "1")
     assert row["status"] == "analysed"
-    assert row["score"] == 91
+    assert row["score"] == 91  # the combined_score is the stored headline score
     got = store.get_analysis("stepstone", "1")
     assert got == _analysis(score=91)
 

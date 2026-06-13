@@ -18,5 +18,8 @@ data/*
 
 # Personal config (PII) — keep only the *.example.md templates
 config/profile.md
+config/profile.en.md
+config/profile.de.md
 config/criteria.md
 config/exceptions.md
+config/request.md

@@ -116,7 +116,7 @@ class JobStore:
                 """,
                 (
                     json.dumps(analysis.to_dict(), ensure_ascii=False),
-                    analysis.match_score,
+                    analysis.combined_score,
                     status,
                     _now_iso(),
                     source,

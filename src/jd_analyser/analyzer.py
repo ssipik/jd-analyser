@@ -1,7 +1,10 @@
-"""JobAnalyzer: score a JobDescription against the user's profile, criteria & exceptions.
+"""JobAnalyzer: score a JobDescription against the user's request.md spec and profiles.
 
-Builds the prompt, calls the swappable LLMInterface with a forced JSON schema, and
-returns a structured JobAnalysis. The schema mirrors `JobAnalysis` exactly.
+The system prompt is the user's own ``config/request.md`` (instructions + criteria + gap
+rules) followed by the CV profiles in both languages; the model picks the profile matching
+the JD's language. Output is forced through ANALYSIS_SCHEMA via tool-use. **The schema and
+`JobAnalysis` must stay in lockstep** — change one, change the other (and the digest
+template that renders the fields).
 """
 from __future__ import annotations
 
@@ -15,80 +18,112 @@ from jd_analyser.models import JobAnalysis, JobDescription
 ANALYSIS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "match_score": {
+        "language": {
+            "type": "string",
+            "enum": ["en", "de", "other"],
+            "description": "Language of the job description.",
+        },
+        "tone": {
+            "type": "string",
+            "description": "Tone of the JD, e.g. 'formal' or 'casual'; steers the cover letter.",
+        },
+        "profile_used": {
+            "type": "string",
+            "enum": ["en", "de"],
+            "description": "Which user profile language was matched against the JD. If no "
+            "profile in the JD's language exists, use the English one and note it in the summary.",
+        },
+        "fit_score": {
             "type": "integer",
             "minimum": 0,
             "maximum": 100,
-            "description": "How well the candidate's profile matches the job's hard and soft "
-            "requirements (0-100), honouring the exceptions.",
+            "description": "How well the user profile matches the JD's hard and soft "
+            "requirements, applying the gap rules and DISREGARDING personal preferences.",
+        },
+        "combined_score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "How well the user profile AND the personal preference criteria "
+            "match the JD.",
         },
         "summary": {"type": "string", "description": "Two or three sentences on overall fit."},
         "pros": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Concrete requirements the candidate clearly fulfils.",
+            "description": "Strong points in the user profile for this specific JD.",
         },
         "cons_hard": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Hard gaps that are likely disqualifying.",
+            "description": "Hard gaps (needed by the JD, likely disqualifying).",
         },
         "cons_soft": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Soft / closeable gaps (nice-to-haves).",
+            "description": "Soft gaps (nice-to-have / closeable per the gap rules).",
         },
         "like_verdict": {
             "type": "string",
             "enum": ["like", "neutral", "dislike"],
-            "description": "Whether the candidate would WANT this job per their criteria "
+            "description": "Whether the user would WANT this job per the criteria "
             "(independent of whether they qualify).",
         },
         "like_rationale": {"type": "string"},
-        "cv_suggestions": {
+        "salary_range": {
+            "type": "string",
+            "description": "Expected annual gross salary range; base it on the JD's own range "
+            "when stated, otherwise estimate and say so.",
+        },
+        "salary_ask": {
+            "type": "string",
+            "description": "Recommended salary to ask for, per the salary instructions.",
+        },
+        "cv_edits": {
             "type": "array",
-            "items": {"type": "string"},
-            "description": "Specific, honest tweaks to the CV to better match THIS job. "
-            "Never fabricate qualifications.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "old": {"type": "string", "description": "Exact existing sentence from the CV."},
+                    "new": {"type": "string", "description": "Truthful replacement sentence."},
+                },
+                "required": ["old", "new"],
+            },
+            "description": "Exact edits to the CV version matching the JD's language "
+            "(old sentence -> new sentence). Truthful changes only; keep the existing tone.",
         },
         "cover_letter": {
             "type": "string",
-            "description": "A concise, tailored cover-letter draft in the JD's language.",
+            "description": "Tailored cover-letter draft in the JD's language.",
         },
-        "recommended_action": {"type": "string", "enum": ["apply", "maybe", "skip"]},
     },
     "required": [
-        "match_score",
+        "language",
+        "tone",
+        "profile_used",
+        "fit_score",
+        "combined_score",
         "summary",
         "pros",
         "cons_hard",
         "cons_soft",
         "like_verdict",
         "like_rationale",
-        "cv_suggestions",
+        "salary_range",
+        "salary_ask",
+        "cv_edits",
         "cover_letter",
-        "recommended_action",
     ],
 }
 
 _SYSTEM_TEMPLATE = """\
-You are a meticulous career assistant helping ONE specific candidate decide whether to \
-apply to a job. Be honest and concrete; never invent qualifications the candidate does not have.
+{request}
 
-=== CANDIDATE PROFILE ===
-{profile}
+=== USER PROFILE (English) ===
+{profile_en}
 
-=== CANDIDATE CRITERIA (what makes a role enjoyable for them) ===
-{criteria}
-
-=== EXCEPTIONS / CLARIFICATIONS (override a naive reading of the profile) ===
-{exceptions}
-
-Scoring guidance:
-- match_score reflects fit against the job's hard AND soft requirements, honouring the exceptions.
-- Separate "can I get it" (match/pros/cons) from "do I want it" (like_verdict per the criteria).
-- cv_suggestions must be truthful tweaks (rephrasing, emphasis, ordering) — no fabrication.
-- Write the cover_letter in the same language as the job description.
+=== USER PROFILE (German) ===
+{profile_de}
 """
 
 _USER_TEMPLATE = """\
@@ -105,24 +140,24 @@ URL: {url}
 
 
 class JobAnalyzer:
-    def __init__(self, llm: LLMInterface, profile: str, criteria: str, exceptions: str = ""):
+    def __init__(self, llm: LLMInterface, request: str, profile_en: str, profile_de: str = ""):
         self.llm = llm
-        self.profile = profile.strip()
-        self.criteria = criteria.strip()
-        self.exceptions = exceptions.strip() or "(none provided)"
+        self.request = request.strip()
+        self.profile_en = profile_en.strip()
+        self.profile_de = profile_de.strip() or "(not provided — use the English profile)"
 
     @classmethod
     def from_config(cls, llm: LLMInterface, config_dir: Path = CONFIG_DIR) -> "JobAnalyzer":
         config_dir = Path(config_dir)
-        profile = _require_file(config_dir / "profile.md")
-        criteria = _require_file(config_dir / "criteria.md")
-        exceptions_path = config_dir / "exceptions.md"
-        exceptions = exceptions_path.read_text(encoding="utf-8") if exceptions_path.exists() else ""
-        return cls(llm, profile, criteria, exceptions)
+        request = _require_file(config_dir / "request.md")
+        profile_en = _require_file(config_dir / "profile.en.md")
+        de_path = config_dir / "profile.de.md"
+        profile_de = de_path.read_text(encoding="utf-8") if de_path.exists() else ""
+        return cls(llm, request, profile_en, profile_de)
 
     def build_system_prompt(self) -> str:
         return _SYSTEM_TEMPLATE.format(
-            profile=self.profile, criteria=self.criteria, exceptions=self.exceptions
+            request=self.request, profile_en=self.profile_en, profile_de=self.profile_de
         )
 
     def build_user_prompt(self, job: JobDescription) -> str:
@@ -146,8 +181,7 @@ class JobAnalyzer:
 
 def _require_file(path: Path) -> str:
     if not path.exists():
-        raise FileNotFoundError(
-            f"Missing {path.name} at {path}. Copy {path.name.replace('.md', '.example.md')} "
-            "and fill it in."
-        )
+        example = path.with_name(path.name.replace(".md", ".example.md"))
+        hint = f" Copy {example.name} and fill it in." if example.exists() else ""
+        raise FileNotFoundError(f"Missing {path.name} at {path}.{hint}")
     return path.read_text(encoding="utf-8")

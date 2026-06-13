@@ -1,5 +1,5 @@
 """Tests for EmailNotifier: rendering, score ordering, and send behaviour."""
-from jd_analyser.models import JobAnalysis, JobDescription, LikeVerdict, RecommendedAction
+from jd_analyser.models import JobAnalysis, JobDescription, LikeVerdict
 from jd_analyser.notifier.base import DigestItem
 from jd_analyser.notifier.email_notifier import EmailNotifier
 
@@ -24,16 +24,21 @@ def _item(ext, score, title) -> DigestItem:
         location="Berlin",
     )
     analysis = JobAnalysis(
-        match_score=score,
+        language="de",
+        tone="formal",
+        profile_used="de",
+        fit_score=score - 10,
+        combined_score=score,
         summary="Summary line.",
         pros=["Python"],
         cons_hard=["Needs PhD"],
         cons_soft=["No k8s"],
         like_verdict=LikeVerdict.LIKE,
         like_rationale="Remote ok.",
-        cv_suggestions=["Add metrics"],
+        salary_range="60.000-75.000 €",
+        salary_ask="72.000 €",
+        cv_edits=[{"old": "Did data.", "new": "Built pipelines."}],
         cover_letter="Dear team,\nI am writing...",
-        recommended_action=RecommendedAction.APPLY,
     )
     return DigestItem(job=job, analysis=analysis)
 
@@ -43,9 +48,12 @@ def test_render_contains_fields_and_orders_by_score():
     html = notifier.render([_item("1", 40, "Low Job"), _item("2", 90, "High Job")])
     # Both jobs and their key fields are present.
     assert "High Job" in html and "Low Job" in html
-    assert "90% match" in html and "40% match" in html
+    assert "90% combined" in html and "40% combined" in html
+    assert "80% fit" in html  # fit_score badge
     assert "Python" in html  # pro
     assert "Needs PhD" in html  # hard gap
+    assert "72.000" in html  # salary ask
+    assert "Built pipelines." in html  # cv edit (new sentence)
     assert "Dear team," in html  # cover letter preserved
     # Highest score appears first in the document.
     assert html.index("High Job") < html.index("Low Job")

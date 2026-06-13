@@ -5,19 +5,24 @@ import pytest
 
 from jd_analyser.analyzer import ANALYSIS_SCHEMA, JobAnalyzer
 from jd_analyser.interfaces.anthropic_llm import AnthropicLLM
-from jd_analyser.models import JobAnalysis, JobDescription, LikeVerdict, RecommendedAction
+from jd_analyser.models import JobAnalysis, JobDescription, LikeVerdict
 
 CANNED = {
-    "match_score": 78,
+    "language": "de",
+    "tone": "formal",
+    "profile_used": "de",
+    "fit_score": 72,
+    "combined_score": 78,
     "summary": "Good fit overall.",
     "pros": ["Python", "SQL"],
     "cons_hard": [],
     "cons_soft": ["No Kubernetes"],
     "like_verdict": "like",
-    "like_rationale": "Remote-friendly and product-focused.",
-    "cv_suggestions": ["Emphasise data pipelines"],
+    "like_rationale": "Hybrid in Düsseldorf, active dev role.",
+    "salary_range": "65.000-80.000 €",
+    "salary_ask": "78.000 €",
+    "cv_edits": [{"old": "Worked with data.", "new": "Built ML pipelines on GCP."}],
     "cover_letter": "Sehr geehrte Damen und Herren, ...",
-    "recommended_action": "apply",
 }
 
 
@@ -47,37 +52,60 @@ def _job() -> JobDescription:
 
 def test_analyzer_builds_prompt_and_parses_result():
     llm = FakeLLM(CANNED)
-    analyzer = JobAnalyzer(llm, profile="10y Python, SQL.", criteria="Wants remote.", exceptions="GCP counts as cloud.")
+    analyzer = JobAnalyzer(
+        llm, request="REQUEST SPEC", profile_en="EN PROFILE", profile_de="DE PROFIL"
+    )
     result = analyzer.analyse(_job())
 
     assert isinstance(result, JobAnalysis)
-    assert result.match_score == 78
+    assert result.fit_score == 72
+    assert result.combined_score == 78
+    assert result.language == "de"
+    assert result.profile_used == "de"
+    assert result.cv_edits == [{"old": "Worked with data.", "new": "Built ML pipelines on GCP."}]
     assert result.like_verdict is LikeVerdict.LIKE
-    assert result.recommended_action is RecommendedAction.APPLY
 
     call = llm.calls[0]
-    # Profile, criteria and exceptions are injected into the system prompt.
-    assert "10y Python, SQL." in call["system"]
-    assert "Wants remote." in call["system"]
-    assert "GCP counts as cloud." in call["system"]
+    # request.md content and both profiles are injected into the system prompt.
+    assert "REQUEST SPEC" in call["system"]
+    assert "EN PROFILE" in call["system"]
+    assert "DE PROFIL" in call["system"]
     # The JD text reaches the user prompt, and the schema is forwarded.
     assert "Kubernetes is a plus" in call["user"]
     assert call["schema"] is ANALYSIS_SCHEMA
     assert call["tool_name"] == "job_analysis"
 
 
+def test_analyzer_without_german_profile_notes_fallback():
+    analyzer = JobAnalyzer(FakeLLM(CANNED), request="R", profile_en="EN PROFILE")
+    assert "(not provided" in analyzer.build_system_prompt()
+
+
 def test_analyzer_from_config_reads_files(tmp_path):
-    (tmp_path / "profile.md").write_text("My profile", encoding="utf-8")
-    (tmp_path / "criteria.md").write_text("My criteria", encoding="utf-8")
-    # exceptions.md intentionally absent -> optional
+    (tmp_path / "request.md").write_text("My request spec", encoding="utf-8")
+    (tmp_path / "profile.en.md").write_text("My EN profile", encoding="utf-8")
+    (tmp_path / "profile.de.md").write_text("Mein DE Profil", encoding="utf-8")
     analyzer = JobAnalyzer.from_config(FakeLLM(CANNED), config_dir=tmp_path)
-    assert "My profile" in analyzer.build_system_prompt()
-    assert analyzer.exceptions == "(none provided)"
+    prompt = analyzer.build_system_prompt()
+    assert "My request spec" in prompt
+    assert "My EN profile" in prompt
+    assert "Mein DE Profil" in prompt
 
 
-def test_analyzer_from_config_missing_profile_raises(tmp_path):
-    (tmp_path / "criteria.md").write_text("c", encoding="utf-8")
-    with pytest.raises(FileNotFoundError, match="profile.md"):
+def test_analyzer_from_config_german_profile_optional(tmp_path):
+    (tmp_path / "request.md").write_text("Spec", encoding="utf-8")
+    (tmp_path / "profile.en.md").write_text("EN profile", encoding="utf-8")
+    analyzer = JobAnalyzer.from_config(FakeLLM(CANNED), config_dir=tmp_path)
+    assert "(not provided" in analyzer.build_system_prompt()
+
+
+@pytest.mark.parametrize("missing", ["request.md", "profile.en.md"])
+def test_analyzer_from_config_missing_required_raises(tmp_path, missing):
+    files = {"request.md": "spec", "profile.en.md": "profile"}
+    files.pop(missing)
+    for name, content in files.items():
+        (tmp_path / name).write_text(content, encoding="utf-8")
+    with pytest.raises(FileNotFoundError, match=missing):
         JobAnalyzer.from_config(FakeLLM(CANNED), config_dir=tmp_path)
 
 

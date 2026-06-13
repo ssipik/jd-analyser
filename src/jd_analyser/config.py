@@ -18,8 +18,10 @@ CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 DATA_DIR = PROJECT_ROOT / "data"
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
-# StepStone job-suggestion sender(s); refined once we inspect a real sample (P2).
-DEFAULT_GMAIL_QUERY = "from:jobs@stepstone.de OR from:jobsuche@stepstone.de"
+# Real StepStone alert sender (confirmed from captured samples); both single-job mails
+# and digests come from this address — the source's filter separates them. Capped to the
+# last 7 days so a scan never trawls the whole mailbox.
+DEFAULT_GMAIL_QUERY = "from:info@jobagent.stepstone.de newer_than:7d"
 
 
 @dataclass(frozen=True)

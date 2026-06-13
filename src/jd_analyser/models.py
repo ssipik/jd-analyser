@@ -23,14 +23,6 @@ class LikeVerdict(str, Enum):
     DISLIKE = "dislike"
 
 
-class RecommendedAction(str, Enum):
-    """Suggested next step given match + fit."""
-
-    APPLY = "apply"
-    MAYBE = "maybe"
-    SKIP = "skip"
-
-
 @dataclass
 class JobDescription:
     """Normalised job posting produced by every source (source-agnostic DTO)."""
@@ -59,37 +51,49 @@ class JobDescription:
 # source-agnostic DTO contract, not LLM-derived.)
 @dataclass
 class JobAnalysis:
-    """Structured assessment of a JobDescription against the user's profile."""
+    """Structured assessment of a JobDescription, per the user's config/request.md spec.
 
-    match_score: int  # 0-100
+    No recommended_action by design: the user decides apply/skip themselves.
+    """
+
+    language: str  # JD language: "en" | "de" | "other"
+    tone: str  # e.g. "formal" / "casual"; steers the cover letter
+    profile_used: str  # which profile language was matched: "en" | "de"
+    fit_score: int  # 0-100, profile vs JD requirements, preferences excluded
+    combined_score: int  # 0-100, profile AND preference criteria
     summary: str
-    pros: list[str]  # requirements the user fulfils
+    pros: list[str]  # strong points in the user profile for this JD
     cons_hard: list[str]  # hard gaps (likely disqualifying)
     cons_soft: list[str]  # soft gaps (nice-to-have / closeable)
     like_verdict: LikeVerdict
     like_rationale: str
-    cv_suggestions: list[str]
+    salary_range: str  # expected annual gross range
+    salary_ask: str  # recommended ask
+    cv_edits: list[dict[str, str]]  # exact edits: {"old": ..., "new": ...}
     cover_letter: str
-    recommended_action: RecommendedAction
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-serialisable dict (enums flattened to their string values)."""
         d = asdict(self)
         d["like_verdict"] = self.like_verdict.value
-        d["recommended_action"] = self.recommended_action.value
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "JobAnalysis":
         return cls(
-            match_score=int(d["match_score"]),
+            language=d.get("language", ""),
+            tone=d.get("tone", ""),
+            profile_used=d.get("profile_used", ""),
+            fit_score=int(d["fit_score"]),
+            combined_score=int(d["combined_score"]),
             summary=d.get("summary", ""),
             pros=list(d.get("pros", [])),
             cons_hard=list(d.get("cons_hard", [])),
             cons_soft=list(d.get("cons_soft", [])),
             like_verdict=LikeVerdict(d.get("like_verdict", "neutral")),
             like_rationale=d.get("like_rationale", ""),
-            cv_suggestions=list(d.get("cv_suggestions", [])),
+            salary_range=d.get("salary_range", ""),
+            salary_ask=d.get("salary_ask", ""),
+            cv_edits=[dict(e) for e in d.get("cv_edits", [])],
             cover_letter=d.get("cover_letter", ""),
-            recommended_action=RecommendedAction(d.get("recommended_action", "maybe")),
         )

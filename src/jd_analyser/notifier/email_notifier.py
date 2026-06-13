@@ -21,7 +21,7 @@ class EmailNotifier(Notifier):
         self.env = Environment(loader=FileSystemLoader(_TEMPLATES_DIR), autoescape=True)
 
     def render(self, items: list[DigestItem]) -> str:
-        ordered = sorted(items, key=lambda i: i.analysis.match_score, reverse=True)
+        ordered = sorted(items, key=lambda i: i.analysis.combined_score, reverse=True)
         template = self.env.get_template("digest.html.j2")
         return template.render(
             items=ordered,
