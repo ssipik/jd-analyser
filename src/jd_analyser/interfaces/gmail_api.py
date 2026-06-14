@@ -7,15 +7,21 @@ without credentials or network access.
 from __future__ import annotations
 
 import base64
+import logging
+import socket
+import ssl
+import time
 from dataclasses import dataclass
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+
+logger = logging.getLogger("jd_analyser")
 
 # Read + modify (labels) and send. gmail.modify covers read & label changes.
 SCOPES = [
@@ -23,6 +29,10 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
 ]
 PROCESSED_LABEL = "JD-Analyser/Processed"
+
+# Google can reset an idle keep-alive socket; the next call then raises one of these
+# (BrokenPipeError is a ConnectionError) mid-flight. We retry on a fresh connection.
+_TRANSIENT_ERRORS = (ConnectionError, socket.timeout, ssl.SSLError)
 
 
 @dataclass
@@ -137,22 +147,40 @@ class GmailAPIInterface:
             )
         return self._service
 
+    def _execute(self, build_request: Callable[[], Any], *, attempts: int = 3) -> Any:
+        """Run a Gmail API call, retrying transient connection drops.
+
+        ``build_request`` builds the request from ``self.service`` and is re-invoked
+        each attempt. A BrokenPipe/reset means the cached keep-alive connection died
+        mid-flight, so we discard the service to force a fresh TLS connection before
+        retrying. ``num_retries`` separately covers server-side 5xx/socket blips.
+        """
+        for attempt in range(1, attempts + 1):
+            try:
+                return build_request().execute(num_retries=2)
+            except _TRANSIENT_ERRORS as exc:
+                if attempt == attempts:
+                    raise
+                logger.warning(
+                    "Gmail request failed (%s); retrying on a fresh connection [%d/%d]",
+                    exc, attempt, attempts - 1,
+                )
+                self._service = None
+                time.sleep(2 ** (attempt - 1))
+
     # -- operations --
     def search(self, query: str, max_results: int = 50) -> list[str]:
         """Return message ids matching a Gmail search query (newest first)."""
         ids: list[str] = []
         page_token: Optional[str] = None
         while len(ids) < max_results:
-            resp = (
-                self.service.users()
-                .messages()
-                .list(
+            resp = self._execute(
+                lambda: self.service.users().messages().list(
                     userId="me",
                     q=query,
                     maxResults=min(500, max_results - len(ids)),
                     pageToken=page_token,
                 )
-                .execute()
             )
             ids.extend(m["id"] for m in resp.get("messages", []))
             page_token = resp.get("nextPageToken")
@@ -161,27 +189,26 @@ class GmailAPIInterface:
         return ids[:max_results]
 
     def get_message(self, msg_id: str) -> EmailMessage:
-        api_msg = (
-            self.service.users()
-            .messages()
-            .get(userId="me", id=msg_id, format="full")
-            .execute()
+        api_msg = self._execute(
+            lambda: self.service.users().messages().get(userId="me", id=msg_id, format="full")
         )
         return parse_message(api_msg)
 
     def send(self, to: str, subject: str, html: str) -> dict[str, Any]:
         body = {"raw": build_raw_message(to, subject, html)}
-        return self.service.users().messages().send(userId="me", body=body).execute()
+        return self._execute(
+            lambda: self.service.users().messages().send(userId="me", body=body)
+        )
 
     def ensure_label(self, name: str = PROCESSED_LABEL) -> str:
-        labels = self.service.users().labels().list(userId="me").execute().get("labels", [])
+        labels = self._execute(
+            lambda: self.service.users().labels().list(userId="me")
+        ).get("labels", [])
         for label in labels:
             if label["name"] == name:
                 return label["id"]
-        created = (
-            self.service.users()
-            .labels()
-            .create(
+        created = self._execute(
+            lambda: self.service.users().labels().create(
                 userId="me",
                 body={
                     "name": name,
@@ -189,13 +216,14 @@ class GmailAPIInterface:
                     "messageListVisibility": "show",
                 },
             )
-            .execute()
         )
         return created["id"]
 
     def mark_processed(self, msg_id: str) -> None:
         if self._processed_label_id is None:
             self._processed_label_id = self.ensure_label()
-        self.service.users().messages().modify(
-            userId="me", id=msg_id, body={"addLabelIds": [self._processed_label_id]}
-        ).execute()
+        self._execute(
+            lambda: self.service.users().messages().modify(
+                userId="me", id=msg_id, body={"addLabelIds": [self._processed_label_id]}
+            )
+        )

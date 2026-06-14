@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = PROJECT_ROOT / "config"
 CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 DATA_DIR = PROJECT_ROOT / "data"
+LOG_DIR = PROJECT_ROOT / "log"
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 # Real StepStone alert sender (confirmed from captured samples); both single-job mails

@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
+import logging
 from dataclasses import asdict
 from pathlib import Path
+
+from jd_analyser.logging_setup import configure_logging
+
+logger = logging.getLogger("jd_analyser")
 
 
 def cmd_dump_samples(args: argparse.Namespace) -> int:
@@ -25,7 +29,7 @@ def cmd_dump_samples(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     ids = gmail.search(query, max_results=args.limit)
-    print(f"Found {len(ids)} message(s) for query: {query!r}")
+    logger.info(f"Found {len(ids)} message(s) for query: {query!r}")
     for mid in ids:
         msg = gmail.get_message(mid)
         base = out_dir / mid
@@ -36,8 +40,8 @@ def cmd_dump_samples(args: argparse.Namespace) -> int:
             base.with_suffix(".html").write_text(msg.html, encoding="utf-8")
         if msg.text:
             base.with_suffix(".txt").write_text(msg.text, encoding="utf-8")
-        print(f"  saved {mid}: {msg.subject!r}")
-    print(f"Wrote samples to {out_dir}")
+        logger.info(f"  saved {mid}: {msg.subject!r}")
+    logger.info(f"Wrote samples to {out_dir}")
     return 0
 
 
@@ -65,7 +69,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     notifier = None
     if not args.no_email:
         if not settings.notify_to:
-            print("NOTIFY_TO is not set in .env — skipping the digest email.", file=sys.stderr)
+            logger.error("NOTIFY_TO is not set in .env — skipping the digest email.")
         else:
             from jd_analyser.notifier.email_notifier import EmailNotifier
 
@@ -75,17 +79,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         scans, store, analyzer, notifier, limit=args.limit, dry_run=args.dry_run
     )
 
-    print(f"Fetched {result.fetched} job(s); {len(result.new)} new.")
+    logger.info(f"Fetched {result.fetched} job(s); {len(result.new)} new.")
     if args.dry_run:
         for job in result.new:
-            print(f"  would store: {job.title!r} — {job.company} [{job.key}]")
+            logger.info(f"  would store: {job.title!r} — {job.company} [{job.key}]")
         return 0
     if analyzer is not None:
-        print(f"Analysed {result.analysed} job(s); {len(result.errors)} error(s).")
+        logger.info(f"Analysed {result.analysed} job(s); {len(result.errors)} error(s).")
         for key, message in result.errors:
-            print(f"  error for {key}: {message}", file=sys.stderr)
+            logger.error(f"  error for {key}: {message}")
     if result.notified:
-        print(f"Digest sent to {settings.notify_to} ({result.notified} job(s)).")
+        logger.info(f"Digest sent to {settings.notify_to} ({result.notified} job(s)).")
     return 1 if result.errors else 0
 
 
@@ -123,9 +127,11 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         parser.print_help()
         return 0
+    log_path = configure_logging()
+    logger.info(f"Logging to {log_path}")
     try:
         return handler(args)
     except (FileNotFoundError, ValueError) as exc:
         # Expected setup/config errors: show a clean message, not a traceback.
-        print(f"error: {exc}", file=sys.stderr)
+        logger.error(f"error: {exc}")
         return 1
