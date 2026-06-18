@@ -25,3 +25,5 @@ config/profile.de.md
 config/criteria.md
 config/exceptions.md
 config/request.md
+.claude/deny-credentials-access.py
+.claude/deny-env-access.py
