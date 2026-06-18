@@ -63,6 +63,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not args.no_llm:
         from jd_analyser.interfaces.anthropic_llm import AnthropicLLM
 
+        if settings.mlflow_tracing:
+            from jd_analyser.tracing import enable_tracing
+
+            enable_tracing(settings.mlflow_tracking_uri, settings.mlflow_experiment)
+
         llm = AnthropicLLM(settings.anthropic_api_key, settings.model)
         analyzer = JobAnalyzer.from_config(llm)
 

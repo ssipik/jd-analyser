@@ -8,12 +8,10 @@ digests are filtered out entirely.
 import pytest
 
 from jd_analyser.interfaces.gmail_api import EmailMessage
-from jd_analyser.sources.stepstone import (
-    StepstoneScan,
-    extract_stepstone_listing_id,
-    is_single_job_email,
-    parse_single_job_email,
-)
+from jd_analyser.sources.stepstone import (StepstoneScan,
+                                           extract_stepstone_listing_id,
+                                           is_single_job_email,
+                                           parse_single_job_email)
 
 PERSONA_SENDER = "Emma Jacobs from Stepstone <info@jobagent.stepstone.de>"
 DIGEST_SENDER = "Stepstone Daily Jobs <info@jobagent.stepstone.de>"

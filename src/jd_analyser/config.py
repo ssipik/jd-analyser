@@ -19,6 +19,10 @@ DATA_DIR = PROJECT_ROOT / "data"
 LOG_DIR = PROJECT_ROOT / "log"
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
+# Local MLflow server for tracing every Anthropic API call. Tracing fails soft: if the
+# server is unreachable the pipeline still runs (traces are just dropped).
+DEFAULT_MLFLOW_TRACKING_URI = "http://localhost:5000"
+DEFAULT_MLFLOW_EXPERIMENT = "jd-analyser"
 # Real StepStone alert sender (confirmed from captured samples); both single-job mails
 # and digests come from this address — the source's filter separates them. Capped to the
 # last 7 days so a scan never trawls the whole mailbox.
@@ -35,10 +39,15 @@ class Settings:
     db_path: Path
     client_secret_path: Path
     token_path: Path
+    mlflow_tracing: bool
+    mlflow_tracking_uri: str
+    mlflow_experiment: str
 
     @classmethod
     def load(cls) -> "Settings":
-        load_dotenv(PROJECT_ROOT / ".env")
+        # override=True so the .env is authoritative: a stale ANTHROPIC_API_KEY (or any
+        # other var) already exported in the shell must not silently shadow it.
+        load_dotenv(PROJECT_ROOT / ".env", override=True)
         return cls(
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             model=os.getenv("MODEL", DEFAULT_MODEL),
@@ -50,4 +59,7 @@ class Settings:
                 os.getenv("GMAIL_CLIENT_SECRET", str(CREDENTIALS_DIR / "client_secret.json"))
             ),
             token_path=Path(os.getenv("GMAIL_TOKEN", str(CREDENTIALS_DIR / "token.json"))),
+            mlflow_tracing=os.getenv("MLFLOW_TRACING", "true").lower() not in ("0", "false", "no"),
+            mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", DEFAULT_MLFLOW_TRACKING_URI),
+            mlflow_experiment=os.getenv("MLFLOW_EXPERIMENT", DEFAULT_MLFLOW_EXPERIMENT),
         )

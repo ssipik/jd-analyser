@@ -2,11 +2,8 @@
 import base64
 import email
 
-from jd_analyser.interfaces.gmail_api import (
-    build_raw_message,
-    extract_bodies,
-    parse_message,
-)
+from jd_analyser.interfaces.gmail_api import (build_raw_message,
+                                              extract_bodies, parse_message)
 
 
 def _b64(s: str) -> str:

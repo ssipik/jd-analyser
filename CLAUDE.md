@@ -70,6 +70,13 @@ and `JobAnalysis` (the structured LLM verdict).
 config, read from `.env`; project paths (`CONFIG_DIR`, `CREDENTIALS_DIR`, `DATA_DIR`) are
 derived there too. Pull config through `Settings`, never hard-code secrets or paths.
 
+- **`tracing.py`** — `enable_tracing(uri, experiment)` points MLflow at the tracking server
+  and calls `mlflow.anthropic.autolog()`, which patches the Anthropic SDK so **every**
+  `messages.create` (prompt, tools, response, tokens, latency) is captured as a trace —
+  including failed calls. `cmd_run` enables it before building `AnthropicLLM` when
+  `MLFLOW_TRACING` is on (default; URI `http://localhost:5000`, experiment `jd-analyser`).
+  It is idempotent and **fails soft**: an unreachable server never breaks the pipeline.
+
 ## Build status — what is NOT wired yet
 
 Phases P0–P6 are built (the `run` pipeline included; StepStone parsing is tuned against real
