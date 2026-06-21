@@ -19,6 +19,7 @@ is kept for canonical stepstone.de URLs (e.g. after resolving a tracking redirec
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from typing import Optional
 
@@ -27,6 +28,8 @@ from bs4 import BeautifulSoup
 from jd_analyser.interfaces.gmail_api import EmailMessage, GmailAPIInterface
 from jd_analyser.models import JobDescription
 from jd_analyser.sources.base import JobDescriptionScan
+
+logger = logging.getLogger("jd_analyser")
 
 SOURCE = "stepstone"
 
@@ -64,8 +67,17 @@ def _html_to_text(html: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
+_ZERO_WIDTH = re.compile("[\u200b\u200c\u200d\ufeff]")
+
+
 def _norm(s: str) -> str:
-    """Lowercase, unify apostrophes/NBSP, collapse whitespace — for marker comparisons."""
+    """Lowercase, unify apostrophes/NBSP, drop zero-width chars, collapse whitespace.
+
+    StepStone titles sometimes carry invisible zero-width spaces that vary between
+    sends of the same job — without stripping them, the dedup hash treats the same
+    posting as a new one.
+    """
+    s = _ZERO_WIDTH.sub("", s)
     return " ".join(s.replace("’", "'").replace("\xa0", " ").lower().split())
 
 
@@ -157,11 +169,21 @@ class StepstoneScan(JobDescriptionScan):
 
     def fetch_job_descriptions(self) -> list[JobDescription]:
         jobs: list[JobDescription] = []
-        for message_id in self.gmail.search(self.query, max_results=self.max_messages):
+        message_ids = self.gmail.search(self.query, max_results=self.max_messages)
+        logger.info(f"stepstone: query {self.query!r} matched {len(message_ids)} message(s)")
+        skipped = 0
+        for message_id in message_ids:
             msg = self.gmail.get_message(message_id)
             if not is_single_job_email(msg):
+                skipped += 1
+                logger.info(f"stepstone: {message_id} skipped (digest/non-single-job): {msg.subject!r}")
                 continue
             job = parse_single_job_email(msg)
             if job is not None:
+                logger.info(
+                    f"stepstone: {message_id} -> {job.title!r} @ {job.company!r} [{job.key}]"
+                )
                 jobs.append(job)
+        if skipped:
+            logger.info(f"stepstone: skipped {skipped} digest/non-single-job message(s)")
         return jobs

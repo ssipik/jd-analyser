@@ -6,6 +6,7 @@ holds the analysis results and lifecycle status. A single file DB is plenty for 
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from jd_analyser.models import JobAnalysis, JobDescription
+
+logger = logging.getLogger("jd_analyser")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -66,15 +69,34 @@ class JobStore:
 
     # -- jobs --
     def filter_new(self, jobs: list[JobDescription]) -> list[JobDescription]:
-        """Return only the jobs whose (source, external_id) is not already stored."""
+        """Return only the jobs whose (source, external_id) is not already stored.
+
+        Logs every duplicate with the title/company it collided against, since the
+        dedup key is a content hash (no stable listing id in StepStone alert emails) —
+        without this, a hash collision on a *different* job looks identical to a
+        legitimate repeat posting in the logs.
+        """
         if not jobs:
             return []
         with closing(self._connect()) as conn:
             existing = {
-                (row["source"], row["external_id"])
-                for row in conn.execute("SELECT source, external_id FROM jobs")
+                (row["source"], row["external_id"]): row
+                for row in conn.execute(
+                    "SELECT source, external_id, title, company, status, fetched_at FROM jobs"
+                )
             }
-        return [j for j in jobs if (j.source, j.external_id) not in existing]
+        new_jobs: list[JobDescription] = []
+        for j in jobs:
+            match = existing.get((j.source, j.external_id))
+            if match is None:
+                new_jobs.append(j)
+            else:
+                logger.info(
+                    f"duplicate: {j.title!r} @ {j.company!r} [{j.key}] already stored as "
+                    f"{match['title']!r} @ {match['company']!r} "
+                    f"(status={match['status']}, fetched_at={match['fetched_at']})"
+                )
+        return new_jobs
 
     def save_job(self, job: JobDescription, status: str = "new") -> None:
         with closing(self._connect()) as conn:
